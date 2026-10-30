@@ -134,7 +134,14 @@ def render(base, settings, rows):
         config.setdefault('dns', {}).setdefault('nameserver-policy', {})[settings['configDomain']] = clash['subscription_dns']
     for provider in config.get('rule-providers', {}).values():
         provider.setdefault('proxy', auto)
-    return config, {'proxies': [node(r, settings) for r in rows]}
+    generated = {key: config.pop(key) for key in ('proxy-groups', 'proxy-providers')}
+    config.setdefault('proxies', [])
+    ordered = {}
+    for key, value in config.items():
+        ordered[key] = value
+        if key == 'proxies':
+            ordered.update(generated)
+    return ordered, {'proxies': [node(r, settings) for r in rows]}
 
 
 def publish(s3, settings, config, provider, root=ROOT):

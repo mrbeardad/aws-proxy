@@ -5,41 +5,27 @@
   "mode": "rule",
   "log-level": "info",
   "ipv6": false,
-  "profile": {
-    "store-selected": true
-  },
-  "proxies": [],
   "dns": {
     "enable": true,
     "ipv6": false,
     "enhanced-mode": "fake-ip",
     "fake-ip-range": "198.18.0.1/16",
-    "fake-ip-filter": [
-      "*.lan",
-      "*.local",
-      "localhost"
-    ],
-    "default-nameserver": [
-      "223.5.5.5",
-      "119.29.29.29"
-    ],
-    "nameserver": [
-      "https://1.1.1.1/dns-query"
-    ],
-    "proxy-server-nameserver": [
-      "223.5.5.5",
-      "119.29.29.29"
-    ],
-    "direct-nameserver": [
-      "https://dns.alidns.com/dns-query"
-    ],
+    "fake-ip-filter": ["*.lan", "*.local", "localhost"],
+    "nameserver": ["https://1.1.1.1/dns-query"],
+    "default-nameserver": ["223.5.5.5", "119.29.29.29"],
+    "proxy-server-nameserver": ["223.5.5.5", "119.29.29.29"],
+    "direct-nameserver": ["https://dns.alidns.com/dns-query"],
     "respect-rules": true,
     "nameserver-policy": {
-      "rule-set:private,direct": [
-        "https://dns.alidns.com/dns-query"
-      ]
+      "rule-set:private,direct": ["https://dns.alidns.com/dns-query"]
     }
   },
+  "profile": {
+    "store-selected": true
+  },
+  "proxies": [],
+  "proxy-groups": [],
+  "proxy-providers": {},
   "rule-providers": {
     "reject": {
       "type": "http",

@@ -1,8 +1,8 @@
-# CloudFront proxy
+# aws-proxy
 
-Deploy an Xray VLESS/WebSocket origin on an existing Ubuntu server, discover usable CloudFront edge IPs, and publish a Mihomo/Clash Verge Rev subscription through a separate CloudFront distribution backed by private S3.
+Deploy an Xray VLESS/WebSocket proxy on an existing Ubuntu Lightsail instance for clients mainly connecting from mainland China. Discover usable CloudFront edge IPs and publish a Mihomo/Clash Verge Rev subscription through a separate CloudFront distribution backed by private S3.
 
-AWS settings, origin details, edge selection and Clash behavior come from JSON files. Tokyo is an example, not a requirement. The origin can be Lightsail, EC2, or another publicly reachable Ubuntu host. AWS remains the hosting backend; this is not a multi-cloud provisioner.
+The project targets AWS Lightsail, CloudFront, S3 and IAM. Account details, origin settings, edge selection and Clash behavior come from JSON files. Tokyo is the default example; other AWS regions can be configured. This version deploys the CloudFront path only. Reachability from mainland China still depends on the client's ISP and route and must be tested there.
 
 ## What runs
 
@@ -21,6 +21,20 @@ Clash ── TLS + VLESS/WebSocket ── proxy CloudFront ── HTTPS ── N
 - No candidate available means `AUTO` rejects connections rather than silently going direct. Use a Mihomo version supporting `empty-fallback`; legacy Clash is not supported.
 - Xray is an upstream dependency downloaded as a pinned release with a required SHA256. This repo contains deployment and publisher source, not a copy of Xray-core.
 
+### Python and server processes
+
+Ubuntu on Lightsail supports Python 3. Bootstrap installs `python3-boto3` (including its Python dependencies); the publisher runs with `/usr/bin/python3`. Deployment commands run on your administration machine or CloudShell, not as a permanent server process.
+
+| Component | Processes on the Lightsail instance |
+| --- | --- |
+| Xray | One persistent process for VLESS/WebSocket |
+| Nginx | One persistent master plus its configured worker processes |
+| Publisher | One Python process per hourly run, with a `flock` wrapper and up to four concurrent curl probes; exits afterward |
+| Certbot | Runs periodically for certificate renewal; exits afterward |
+| CloudFront, S3, IAM | AWS-managed services; no processes on the instance |
+
+There are two persistent application services, totaling **2 + Nginx worker count** processes in steady state (for example, four processes with two workers), excluding normal operating-system services. Systemd timers do not keep Python or Certbot running while idle. Keeping a separately installed direct REALITY service adds its Xray process; this repo does not install that service.
+
 ## Files and configuration
 
 | File | Purpose |
@@ -35,7 +49,7 @@ Copy examples to `config/deployment.json` and `config/clash.json`, then set `cla
 
 `project` determines resource prefixes, `/opt/<project>` and systemd names. Use a different project and state directory for each deployment. Infrastructure settings are bound to the saved state; changing an account, server, or region requires a separate deployment. Discovery and Clash settings can be updated in place.
 
-The Clash base accepts JSON, which is also valid YAML. Omit `proxy-groups` and `proxy-providers`: those are generated. The renderer preserves the other base settings and rule order, prepending one `DOMAIN,<config distribution>,DIRECT` rule for subscription access. It adds subscription DNS overrides from `subscription_dns`, and uses `AUTO` for rule downloads unless a rule provider explicitly sets another proxy. If you rename `PROXY`, update rule targets in the base too. Tests do not replace full Mihomo configuration validation.
+The Clash base accepts JSON, which is also valid YAML. Leave `proxy-groups` and `proxy-providers` empty (as in the example) or omit them: those are generated and placed immediately after `proxies`, in that order, as sibling keys. The renderer preserves the other base settings, key order and rule order, prepending one `DOMAIN,<config distribution>,DIRECT` rule for subscription access. It adds subscription DNS overrides from `subscription_dns`, and uses `AUTO` for rule downloads unless a rule provider explicitly sets another proxy. If you rename `PROXY`, update rule targets in the base too. Tests do not replace full Mihomo configuration validation.
 
 The example uses port 7890, IPv6 disabled, mainland-oriented DNS and the agreed Loyalsoldier/GEOIP ordering. Replace those values for your own network. `gfw` and `tld-not-cn` are declared but unused, matching the original provider example; remove them if unwanted. TUN activation and UI overrides remain client settings.
 
@@ -43,7 +57,7 @@ You can add existing direct proxies to the base `proxies` list. This deployment 
 
 ## Prerequisites
 
-1. An existing Ubuntu 22.04/24.04 host with a stable public IPv4 address and outbound internet access. Server creation, IP allocation and firewall changes are manual.
+1. An existing Ubuntu 22.04/24.04 Lightsail instance with an attached static public IPv4 address and outbound internet access. Instance creation, static IP allocation and firewall changes are manual.
 2. An origin DNS name resolving to that address and eligible for a public certificate. A domain you control is preferable; an IP-based DNS service is possible but adds that service's availability and certificate-policy constraints.
 3. TCP 80 reachable for ACME validation/renewal; the configured HTTPS origin port (8443 by default) reachable by CloudFront. Keep the loopback WebSocket port private and SSH restricted to your administration source. This tool does not change firewalls.
 4. SSH key authentication, passwordless sudo, and a verified host key already in `known_hosts`. Compare the fingerprint through a trusted console channel before accepting it. Configure custom ports or identity files in `~/.ssh/config`; `server.ssh_target` can be an alias. Do not disable host-key verification.
@@ -98,11 +112,11 @@ Updates reuse the installed publisher key and restart the hourly publisher. The 
 On the server (substitute your project name):
 
 ```bash
-sudo systemctl status edge-proxy.service edge-proxy-publish.timer
-sudo journalctl -u edge-proxy-publish.service -n 50 --no-pager
-sudo cat /opt/edge-proxy/status.json
-sudo systemctl start edge-proxy-publish.service
-sudo python3 /opt/edge-proxy/publisher.py --root /opt/edge-proxy --discover-only
+sudo systemctl status aws-proxy.service aws-proxy-publish.timer
+sudo journalctl -u aws-proxy-publish.service -n 50 --no-pager
+sudo cat /opt/aws-proxy/status.json
+sudo systemctl start aws-proxy-publish.service
+sudo python3 /opt/aws-proxy/publisher.py --root /opt/aws-proxy --discover-only
 ```
 
 `--discover-only` makes network probes but performs no S3 writes. A failed run preserves the last published data; check for a stale last-success timestamp. The hourly job has a process lock and time limit. No monitoring service is created.

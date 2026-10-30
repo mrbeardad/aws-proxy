@@ -44,6 +44,20 @@ class PublisherTests(unittest.TestCase):
         self.assertEqual(nodes['proxies'][1]['server'], '54.248.1.1')
         self.assertNotIn('flow', nodes['proxies'][0])
 
+    def test_generated_sections_follow_proxies_and_preserve_other_key_order(self):
+        base = json.loads(Path(__file__).with_name('config').joinpath('clash.example.json').read_text(encoding='utf-8'))
+        for placeholders in (True, False):
+            if not placeholders:
+                base.pop('proxy-groups')
+                base.pop('proxy-providers')
+            with self.subTest(placeholders=placeholders):
+                cfg, _ = p.render(base, self.settings(), [{'ip': '3.173.250.23', 'pop': 'NRT20-P8'}])
+                keys = list(json.loads(json.dumps(cfg)))
+                start = keys.index('proxies')
+                self.assertEqual(keys[start:start + 3], ['proxies', 'proxy-groups', 'proxy-providers'])
+                generated = {'proxy-groups', 'proxy-providers'}
+                self.assertEqual([key for key in keys if key not in generated], [key for key in base if key not in generated])
+
     def test_failed_discovery_keeps_previous_files(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

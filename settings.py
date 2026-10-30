@@ -43,5 +43,5 @@ def load(path):
     require(isinstance(clash['subscription_dns'], list) and all(isinstance(x, str) for x in clash['subscription_dns']), 'subscription_dns must be a list')
     base = json.loads((path.parent / clash['base_file']).read_text(encoding='utf-8'))
     require(isinstance(base.get('rules'), list) and all(isinstance(x, str) for x in base['rules']), 'Clash base requires a rules list')
-    require(not base.get('proxy-groups') and not base.get('proxy-providers'), 'Groups and providers are generated; omit them from the base')
+    require(not base.get('proxy-groups') and not base.get('proxy-providers'), 'Groups and providers are generated; leave them empty or omit them from the base')
     return cfg, base

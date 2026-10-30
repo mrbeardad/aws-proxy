@@ -103,7 +103,7 @@ class DeployTests(unittest.TestCase):
         self.assertEqual(policy['Statement'][0]['Action'], 's3:PutObject')
         self.assertEqual(len(policy['Statement'][0]['Resource']), 2)
         self.assertTrue(all('*' not in arn for arn in policy['Statement'][0]['Resource']))
-        self.assertIn('test -s /opt/edge-proxy/publisher-credentials', run.call_args.args[1])
+        self.assertIn('test -s /opt/aws-proxy/publisher-credentials', run.call_args.args[1])
 
     def test_generated_bash_syntax_and_pinned_bootstrap(self):
         with self.assertRaises(ValueError):
@@ -113,7 +113,7 @@ class DeployTests(unittest.TestCase):
         self.assertIn('sha256sum --check --status', scripts[0])
         self.assertIn('renewal-hooks/deploy/', scripts[1])
         files = [base64.b64decode(x).decode() for x in re.findall(r'printf %s ([A-Za-z0-9+/=]+) \| base64', scripts[2])]
-        self.assertTrue(any('--root /opt/edge-proxy' in content for content in files))
+        self.assertTrue(any('--root /opt/aws-proxy' in content for content in files))
         if not shutil.which('bash'):
             self.skipTest('Bash is needed for generated shell syntax validation')
         for script in scripts:
