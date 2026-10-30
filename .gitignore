@@ -1,0 +1,12 @@
+# Local configuration and deployment state contain credentials and subscription URLs.
+/config/*.json
+!/config/*.example.json
+/.state/
+/.venv/
+__pycache__/
+*.py[cod]
+*.pem
+*.key
+*.zip
+*.log
+/.local/
