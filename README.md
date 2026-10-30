@@ -25,15 +25,35 @@ Clash ── TLS + VLESS/WebSocket ── 代理 CloudFront ── HTTPS ── 
 
 Lightsail 上的 Ubuntu 支持 Python 3。初始化脚本安装 `python3-boto3` 及其 Python 依赖，发布程序使用 `/usr/bin/python3`。部署命令在管理电脑或 CloudShell 中执行，不会常驻服务器。
 
-| 组件 | Lightsail 实例上的进程 |
-| --- | --- |
-| Xray | 1 个常驻进程，处理 VLESS/WebSocket |
-| Nginx | 1 个常驻主进程，加上配置的工作进程 |
-| 发布程序 | 每小时启动 1 个 Python 进程，外加 `flock` 包装进程和最多 4 个并行 curl 探测进程；完成后退出 |
-| Certbot | 定期检查和续签证书，完成后退出 |
-| CloudFront、S3、IAM | AWS 托管服务，不占用实例上的进程 |
+| 组件 | 目的和用途 | Lightsail 实例上的进程 |
+| --- | --- | --- |
+| Xray | 真正执行代理：接收 Nginx 转来的 VLESS/WebSocket 连接，校验客户端 UUID，并从 Lightsail 连接目标网站、转发流量。内部仅监听 `127.0.0.1:<ws_port>`。 | 1 个常驻进程 |
+| Nginx | 作为 CloudFront 的 HTTPS 源站：加载源站证书、检查 `X-Origin-Token`，将指定路径的 WebSocket 连接转给 Xray。另提供 `/health` 健康响应和 TCP 80 上的 ACME 验证路径；不向客户端提供订阅文件。 | 1 个常驻主进程，加上配置的工作进程 |
+| 发布程序（Python） | 发现并验证 CloudFront 候选 IP，生成完整配置 `clash.yaml` 和节点列表 `nodes.yaml`，仅将变化的文件上传 S3。它不参与用户的代理流量转发。 | 每小时启动 1 个 Python 进程，外加 `flock` 包装进程和最多 4 个并行 curl 探测进程；完成后退出 |
+| Certbot | 为 `server.origin_hostname` 申请和续签公开信任的证书，供 Nginx 接收 CloudFront 的 HTTPS 回源连接。成功续签后通过部署钩子重载 Nginx，使新证书生效。 | 定时运行，完成后退出；不处理代理流量或订阅下载 |
+| 代理 CloudFront 分配 | 接收客户端到边缘节点的 TLS/WebSocket 连接，通过 HTTPS 转发到 Lightsail 的 Nginx。 | AWS 托管，不在实例上运行 |
+| 订阅 CloudFront 分配 | 提供固定 HTTPS 订阅地址，从私有 S3 读取配置和节点列表。与代理分配分别创建、用途不同。 | AWS 托管，不在实例上运行 |
+| S3 | 保存完整配置、节点列表及其历史版本，不运行 Xray，也不转发代理流量。 | AWS 托管，不在实例上运行 |
+| IAM | 限制发布程序只能写入两个指定的 S3 对象；下载侧由桶策略和 CloudFront OAC 控制访问。 | AWS 托管，不在实例上运行 |
 
 不计操作系统服务，平时有两个常驻应用服务，总进程数为 **2 + Nginx 工作进程数**。例如 Nginx 有 2 个工作进程时，共有 4 个常驻应用进程。Systemd 定时器在等待期间不会让 Python 或 Certbot 常驻。保留另行安装的直连 REALITY 服务会再增加一个 Xray 进程；本仓库不安装该服务。
+
+### 文件已经托管到 S3，为什么仍需要 Certbot？
+
+S3 托管的是订阅文件；代理连接仍需要经过 Lightsail。这两条链路分别使用不同的 HTTPS 连接：
+
+| 连接 | 证书由谁管理 |
+| --- | --- |
+| Clash → 订阅 CloudFront | 当前使用默认 `*.cloudfront.net` 域名，由 AWS 管理证书 |
+| 订阅 CloudFront → 私有 S3 | 使用 AWS 的 S3 HTTPS 服务端点，无需在 Lightsail 安装证书 |
+| Clash → 代理 CloudFront | 当前使用默认 `*.cloudfront.net` 域名，由 AWS 管理证书 |
+| 代理 CloudFront → Lightsail Nginx | 使用 `server.origin_hostname` 的源站证书，由 Certbot 申请和续签 |
+
+**Certbot 维护的是最后一段的源站证书，不是订阅文件的证书。** CloudFront 在边缘终止客户端 TLS 连接，再单独建立到源站的 HTTPS 连接；边缘端的证书不能代替源站证书。当前代码将回源策略设为 `https-only`，并让 Nginx 在 `server.https_port`（默认 8443）加载 Certbot 管理的证书。Nginx 再通过本机回环地址上的 WebSocket 将连接转给 Xray，这一段不另外使用 TLS。
+
+CloudFront 要求 HTTPS 源站证书受信任、有效且匹配域名；证书过期或无效时，回源会失败并可能返回 502，即使 S3 上的订阅仍能正常下载。参见 [AWS 的 HTTPS 回源与证书要求](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/using-https-cloudfront-to-custom-origin.html)。
+
+Certbot 是本项目选用的证书管理工具，不是代理协议本身的硬性要求。可以用其他方式维护有效证书，但不能仅因为文件搬到 S3 就删除它。当前方案通过 Nginx 的 TCP 80 验证路径完成申请和续签，续签成功后重载 Nginx；相关机制见 [Certbot 续签说明](https://eff-certbot.readthedocs.io/en/stable/using.html#renewing-certificates)。
 
 ## 文件与配置
 
