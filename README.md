@@ -38,23 +38,6 @@ Lightsail 上的 Ubuntu 支持 Python 3。初始化脚本安装 `python3-boto3` 
 
 不计操作系统服务，平时有两个常驻应用服务，总进程数为 **2 + Nginx 工作进程数**。例如 Nginx 有 2 个工作进程时，共有 4 个常驻应用进程。Systemd 定时器在等待期间不会让 Python 或 Certbot 常驻。保留另行安装的直连 REALITY 服务会再增加一个 Xray 进程；本仓库不安装该服务。
 
-### 文件已经托管到 S3，为什么仍需要 Certbot？
-
-S3 托管的是订阅文件；代理连接仍需要经过 Lightsail。这两条链路分别使用不同的 HTTPS 连接：
-
-| 连接 | 证书由谁管理 |
-| --- | --- |
-| Clash → 订阅 CloudFront | 当前使用默认 `*.cloudfront.net` 域名，由 AWS 管理证书 |
-| 订阅 CloudFront → 私有 S3 | 使用 AWS 的 S3 HTTPS 服务端点，无需在 Lightsail 安装证书 |
-| Clash → 代理 CloudFront | 当前使用默认 `*.cloudfront.net` 域名，由 AWS 管理证书 |
-| 代理 CloudFront → Lightsail Nginx | 使用 `server.origin_hostname` 的源站证书，由 Certbot 申请和续签 |
-
-**Certbot 维护的是最后一段的源站证书，不是订阅文件的证书。** CloudFront 在边缘终止客户端 TLS 连接，再单独建立到源站的 HTTPS 连接；边缘端的证书不能代替源站证书。当前代码将回源策略设为 `https-only`，并让 Nginx 在 `server.https_port`（默认 8443）加载 Certbot 管理的证书。Nginx 再通过本机回环地址上的 WebSocket 将连接转给 Xray，这一段不另外使用 TLS。
-
-CloudFront 要求 HTTPS 源站证书受信任、有效且匹配域名；证书过期或无效时，回源会失败并可能返回 502，即使 S3 上的订阅仍能正常下载。参见 [AWS 的 HTTPS 回源与证书要求](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/using-https-cloudfront-to-custom-origin.html)。
-
-Certbot 是本项目选用的证书管理工具，不是代理协议本身的硬性要求。可以用其他方式维护有效证书，但不能仅因为文件搬到 S3 就删除它。当前方案通过 Nginx 的 TCP 80 验证路径完成申请和续签，续签成功后重载 Nginx；相关机制见 [Certbot 续签说明](https://eff-certbot.readthedocs.io/en/stable/using.html#renewing-certificates)。
-
 ## 文件与配置
 
 | 文件 | 用途 |
@@ -116,7 +99,7 @@ Clash 基础配置使用 JSON，也是合法的 YAML。`proxy-groups` 和 `proxy
 | `discovery.max_candidates` | `8` | 最终发布节点数的上限，允许 1～32。可用节点不足时发布实际数量；一个都没有时失败并保留上次发布内容。 |
 | `discovery.probe_budget` | `64` | 每轮最多探测多少个去重后的公网 IPv4，不得小于 `max_candidates`，且不超过 64。这是数量限制，不是金额预算。当前并行度固定为 4。 |
 
-`aws.region`、`hint_regions` 和 `pop_prefixes` 分别控制 AWS 部署区域、DNS 提示来源和最终接受的 POP，可以分别设置。服务器端探测不能证明 IP 从北京可达，最终仍由客户端健康检查选择节点。
+`aws.region`、`hint_regions` 和 `pop_prefixes` 分别控制 AWS 部署区域、DNS 提示来源和最终接受的 POP，可以分别设置。服务器端探测不能证明 IP 从国内可达，最终仍由客户端健康检查选择节点。
 
 ### clash：生成的客户端配置
 
@@ -185,7 +168,7 @@ python deploy.py verify       # 验证服务、S3、CloudFront，并模拟证书
 
 服务器综合使用系统 DNS、Google DoH（包括基于指定 AWS 区域地址生成的 EDNS 客户端子网提示）、种子 IP 和上次发布的 IP。每轮最多探测 64 个公网 IPv4，并行度为 4，检查分配域名的 TLS 证书、准确的健康响应内容以及允许的 `x-amz-cf-pop` 前缀。默认最多发布 8 个候选，尽量覆盖本次观察到的不同 POP。
 
-这是尽力发现候选的算法，不会遍历全部 AWS 边缘节点，也不代表北京线路实测。服务器可达不等于大陆客户端可达；同一 IP 所服务的 POP 也可能变化。客户端的 `AUTO` 检查负责选择可用节点。若结果都不在允许的位置中，可加入经过客户端实测的种子 IP，或调整允许的 POP。客户端应保留上次可用的订阅和节点缓存。
+这是尽力发现候选的算法，不会遍历全部 AWS 边缘节点，也不代表国内线路实测。服务器可达不等于大陆客户端可达；同一 IP 所服务的 POP 也可能变化。客户端的 `AUTO` 检查负责选择可用节点。若结果都不在允许的位置中，可加入经过客户端实测的种子 IP，或调整允许的 POP。客户端应保留上次可用的订阅和节点缓存。
 
 修改发现设置、Clash 基础配置或发布程序源码后，运行：
 
